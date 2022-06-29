@@ -1,0 +1,527 @@
+---
+title: "R Notebook"
+output: html_notebook
+author : Kamaldeep Kaur
+---
+
+
+```{r}
+#install.packages("Metrics")
+#install.packages("car")
+library(tseries)
+library(plyr)
+library(forecast)
+library(tsutils)
+library(imputeTS)
+library(smooth)
+library(tidyverse)
+library(Metrics)
+library(data.table)
+library(car)
+library(zoo)
+library(xts)
+#Load the data
+#setwkdir
+setwd("D:/Modules/Forecasting/CW2")
+print(getwd())
+data=read.csv("NN5-015.csv")
+# create the sequence for ts object
+inds=seq(as.Date("1996-03-18"),as.Date("1998-03-22"),by="day")
+# Form ts object for modelling
+ts_k=ts(data$Val,start=c(1996,as.numeric(format(inds[1],"%j"))),
+        frequency = 365)
+TSname="NN5-015"
+Date <- seq(as.Date("1996-03-18"),as.Date("1998-03-22"),by="day")
+
+# Timeseries1 :Seasonal impute with moving average
+ts_k_wday_w=ts(ts_k,start=c(12,1),frequency = 7)
+ts_k_impw=na_seasplit(ts_k_wday_w,algorithm ="ma")
+ggplot_na_imputations(ts_k,ts_k_impw, title = paste("Imputed values with seasonal ma for", TSname))
+
+# Timeseries2 : Seasonal impute with moving average With removed outlier 
+ts_k_wday_w_nout=ts(replace(ts_k,641,NA),start=c(12,1),frequency = 7)
+ts_k_impw_nout=na_seasplit(ts_k_wday_w,algorithm ="ma")
+
+# Timeseries3 : Seasonal impute with moving average for 0 and missing values to asses multiplicative model and not outlier
+test <- replace(ts_k,641,NA)
+test <- as.data.frame(test)
+test[test==0] <- NA
+ts_k1=ts(test$x,start=c(1996,as.numeric(format(inds[1],"%j"))),frequency = 365)
+ts_k_wday_w_m=ts(ts_k1,start=c(12,1),frequency = 7)
+ts_k_impw_m=na_seasplit(ts_k_wday_w_m,algorithm ="ma")
+```
+# Split the data
+```{r}
+# Set horizon and number of rolling origins
+h <- 30
+origins <- 10  
+step <- 7
+ts_length <- length(ts_k_impw)
+train_length <- ts_length - h - (origins*step) + 1   # multiply by 7 for multistep ahead validation
+test_length <- h + (origins*step) - 1
+print(train_length)
+print(test_length)
+
+# Split data for Timeseries1 with no missing values
+ts_k_train <- ts(ts_k_impw[1:train_length],
+frequency=frequency(ts_k_impw),
+start=start(ts_k_impw))
+ts_k_test <- ts(ts_k_impw[(train_length+1):ts_length])
+# Split data for Timeseries2 with no missing values and no outlier
+ts_k_train_nout <- ts(ts_k_impw_nout[1:train_length],
+frequency=frequency(ts_k_impw_nout),
+start=start(ts_k_impw_nout))
+ts_k_test_nout <- ts(ts_k_impw_nout[(train_length+1):ts_length])
+# Split data for Timeseries3 with no missing values and no outlier and no 0 valus for multiplicative trend test
+ts_k_train_m <- ts(ts_k_impw_m[1:train_length],
+frequency=frequency(ts_k_impw_m),
+start=start(ts_k_impw_m))
+ts_k_test_m <- ts(ts_k_impw_m[(train_length+1):ts_length])
+
+```
+
+#Functions 
+```{r}
+# Function to create out of sample data and hold out
+Modeltest <- function(modelequ,ts_k_impw,ts_k_test,ModelName,forcstval= "forecast",origins= 10,h = 30,
+                      step= 7, lag = 0)
+{
+ts_k_forecasts <- matrix(NA, nrow=origins, ncol=h)
+ts_k_holdout <- matrix(NA, nrow=origins, ncol=h)
+
+colnames(ts_k_forecasts) <- paste0("horizon",c(1:h))
+rownames(ts_k_forecasts) <- paste0("origin",c(1:origins))
+dimnames(ts_k_holdout) <- dimnames(ts_k_forecasts)
+trainmetrix <- data.frame("MAE"= double(), "MSE"= double(),"MAPE"= double(),"RMSE"= double(), "WAPE"= double(),"AIC"= double())
+testmetrix <- data.frame("MAE"= double(), "MSE"= double(),"MAPE"= double(),"RMSE"= double(),"WAPE"= double(),"AIC"= double())
+for(i in 1:origins){
+# Create a ts object out of the ts_k_impw data
+  if (i != 1){j <- (i-1)*7} else {j <- i}
+  train_set <- ts(ts_k_impw[1:(train_length+j-1)],
+  frequency=frequency(ts_k_impw),
+  start=start(ts_k_impw))
+# Write down the holdout values from the test set
+  ts_k_holdout[i,] <- ts_k_test[j-1+(1:h)]
+# Produce forecasts and write them down
+  modelfit <- eval(parse(text=modelequ))
+  if (forcstval == "pred"){
+  ts_k_forecasts[i,] <- eval(parse(text=paste("predict(modelfit)$",forcstval,sep="")))}
+  else {
+  ts_k_forecasts[i,] <- eval(parse(text=paste("modelfit$",forcstval,sep="")))
+  }
+# Error for out of sample data
+  meanabserror <- mae(ts_k_holdout[i,],ts_k_forecasts[i,])
+  meansqerror <- mse(ts_k_holdout[i,],ts_k_forecasts[i,])
+  meanabspererror <- mape(ts_k_holdout[i,],ts_k_forecasts[i,])
+  rootmeansqerror <- rmse(ts_k_holdout[i,],ts_k_forecasts[i,])
+  wapeerror <- sum(abs(diff(ts_k_holdout[i,]-ts_k_forecasts[i,])))/sum(ts_k_holdout[i,])
+  testmetrix[nrow(testmetrix) + 1,] = c(meanabserror,meansqerror,meanabspererror,rootmeansqerror,wapeerror,0)
+# Error for In Sample data
+  if (forcstval=="pred"){ 
+    fittedVal <- fitted.values(modelfit)[(lag+1):length(fitted.values(modelfit))]
+}
+  else {fittedVal <- modelfit$fitted[(lag+1):length(modelfit$fitted)]}
+  actualVal <- train_set[(lag+1):length(train_set)]
+  meanabserror1 <- mae(actualVal,fittedVal)
+  meansqerror1 <- mse(actualVal,fittedVal)
+  meanabspererror1 <- mape(actualVal,fittedVal)
+  rootmeansqerror1 <- rmse(actualVal,fittedVal)
+  wapeerror1 <- sum(abs(diff(actualVal-fittedVal)))/sum(actualVal)
+  if (forcstval=="mean"){modelAIC <- 0}
+  else {  modelAIC <- AIC(modelfit)}
+  trainmetrix[nrow(trainmetrix) + 1,] = c(meanabserror1,meansqerror1,meanabspererror1,rootmeansqerror1,wapeerror1,modelAIC)
+}
+Testerror <- round(colMeans(testmetrix),2)
+Trainerror <- round(colMeans(trainmetrix),2)
+errmet <- rbind(cbind(Model=ModelName,Sample="In Sample",t(Trainerror)),cbind(Model=ModelName,Sample="Out Sample",t(Testerror)))
+return(errmet)
+}
+
+```
+# Naive and Seasonal Naive
+```{r}
+#Naive
+ErrmatN <- Modeltest("naive(train_set,h = h)",ts_k_impw,ts_k_test,ModelName ="Naive",forcstval = "mean",lag = 1)
+print(ErrmatN)
+#SNaive
+ErrmatSN <- Modeltest("snaive(train_set,h = h)", ts_k_impw,ts_k_test,ModelName ="SNaive",forcstval = "mean", lag =7)
+print(ErrmatSN)
+# Plot 14 days forecast
+print(getwd())
+SNaiveforecast <- snaive(ts_k_impw,h = 14)
+jpeg("SNaive forecast.jpg")
+plot(SNaiveforecast)
+dev.off()
+
+```
+# Exponential Smoothing Models
+```{r}
+# Additive Error term, No Trend, Additive Seasonality model
+ErrmatES1 <- Modeltest("es(train_set, model='MAM', h = h, holdout= FALSE)",ts_k_impw_m,ts_k_test_m,ModelName ="ESMAM")
+print(ErrmatES1)
+# Additive Error term, No Trend, Multiplicative Seasonality model
+ErrmatES2 <- Modeltest("es(train_set, model='ANM', h = h, holdout= FALSE)",ts_k_impw_m,ts_k_test_m,ModelName ="ESANM")
+print(ErrmatES2) # SO far best model
+# Additive Error term, Additive Trend, Additive Seasonality model
+ErrmatES3 <- Modeltest("es(train_set, model='AAA', h = h, holdout= FALSE)",ts_k_impw_m,ts_k_test_m,ModelName ="ESAAA")
+print(ErrmatES3)
+# Additive Error term, Additive Trend, Multiplicative Seasonality model
+ErrmatES4 <- Modeltest("es(train_set, model='AAM', h = h, holdout= FALSE)",ts_k_impw_m,ts_k_test_m,ModelName ="ESAAM")
+print(ErrmatES4)
+# Additive Error term, No Trend, Multiplicative Seasonality model, with manually estimated coefficients
+ErrmatES5 <- Modeltest("es(train_set, model='ANM', h = h, holdout= FALSE,persistence= c(0.07,0.26))",ts_k_impw_m,ts_k_test_m,ModelName ="ESANMSelCoeff")
+print(ErrmatES5)
+# Auto Selected ETS with Multiplicative Error term, No Trend, Multiplicative Seasonality
+ErrmatES6 <- Modeltest("es(train_set,model = 'MNM',h = h, holdout=  FALSE)",ts_k_impw_m,ts_k_test_m,ModelName ="ESMNMAuto")
+print(ErrmatES6)
+```
+# Find Coefficient of ESANM 
+```{r}
+# Validate model 2 coefficient
+ESANM <- es(ts_k_impw_m, model='ANM', h = h, holdout= TRUE,silent= "none")
+print(coef(ESANM))
+summary(ESANM)
+
+# Change in gamma and alpha
+ESANMerror <- data.frame("Alpha" = double(),"Gamma"= double(),"MAPE"= double(),"RMSE"= double(), "AIC"= double())
+for ( a in seq(0.01,1,by=0.05)){
+  for ( g in seq(0.01, 1, by= 0.05)){
+    #print(paste(a,g))
+    ESANM <- es(ts_k_impw_m, model='ANM', h = 30, persistence= c(a,g) , holdout= TRUE)
+  ESANMerror <- rbind(ESANMerror,c(Alpha=a,Gamma=g,MAPE=ESANM$accuracy["MAPE"],RMSE= ESANM$accuracy["rRMSE"], AIC = ESANM$ICs[1]))
+  }
+}
+colnames(ESANMerror) <- c("Alpha","Gamma","MAPE","RMSE","AIC")
+#checkresiduals(ESANM)
+# For constant alpha
+ESANMerror_gamma <- data.frame("Alpha" = double(),"Gamma"= double(),"MAPE"= double(),"RMSE"= double(),"AIC" = double())
+for ( g in seq(0.01, 1, by= 0.05)){
+    #print(paste(a,g))
+    ESANMgamma <- es(ts_k_impw_m, model='ANM', h = 30, persistence= c(0.07,g) , holdout= TRUE)
+  ESANMerror_gamma <- rbind(ESANMerror_gamma,c(Alpha=0.07,Gamma=g,MAPE=ESANMgamma$accuracy["MAPE"],RMSE= ESANMgamma$accuracy["rRMSE"],AIC = ESANMgamma$ICs[1]))
+}
+colnames(ESANMerror_gamma) <- c("Alpha","Gamma","MAPE","RMSE","AIC")
+ggplot(ESANMerror_gamma, aes(x= Gamma,y = MAPE)) + geom_line()+ geom_point()
+ggplot(ESANMerror_gamma, aes(x= Gamma,y = AIC)) + geom_line()+ geom_point()
+# For constant gamma
+ESANMerror_alpha <- data.frame("Alpha" = double(),"Gamma"= double(),"MAPE"= double(),"RMSE"= double(),"AIC"= double())
+for ( a in seq(0.02,1,by=0.05)){
+    ESANMalpha <- es(ts_k_impw_m, model='ANM', h = 30, persistence= c(a,0.75) , holdout= TRUE)
+  ESANMerror_alpha <- rbind(ESANMerror_alpha,c(Alpha=a,Gamma=0.26,MAPE=ESANMalpha$accuracy["MAPE"],RMSE= ESANMalpha$accuracy["rRMSE"],AIC = ESANMgamma$ICs[1]))
+}
+colnames(ESANMerror_alpha) <- c("Alpha","Gamma","MAPE","RMSE","AIC")
+ggplot(ESANMerror_alpha, aes(x= Alpha,y = MAPE)) + geom_line()+ geom_point()
+ggplot(ESANMerror_alpha, aes(x= Alpha,y = AIC)) + geom_line()+ geom_point()
+
+# Estimated alpha and gamma
+#alpha =  0.07
+#gamma = 0.75
+
+#Model AAM for residual plot 
+ESAAM_estcoff <- es(ts_k_impw_m, model='AAM', h = h, holdout= TRUE)
+jpeg("ETSAAM_Residuals.jpg")
+ggtsdisplay(ESAAM_estcoff$residuals, lag= 200 , main = "ETSAAM Residuals")
+dev.off()
+checkresiduals(ESAAM_estcoff)
+qqplot()
+#Model coefficients estimated by computer 
+ESMAM_estcoff <- es(ts_k_impw_m, model='MAM', h = h, holdout= TRUE)
+jpeg("ETSMAM_Residuals.jpg")
+ggtsdisplay(ESMAM_estcoff$residuals, lag= 100, main = "ETSMAM Residuals")
+#checkresiduals(ESMAM_estcoff)
+dev.off()
+# alpha- 0.0157 gamma - 0.0000
+# Model with manually estimated coefficients
+ESANM_predefcoff <- es(ts_k_impw_m, model='ANM', h = h,persistence= c(0.07,0.26), holdout= TRUE)
+summary(ESANM_predefcoff)
+# Auto Selecetd Model 
+ESMNM_Auto<- es(ts_k_impw_m, model='MNM', h = h, holdout= TRUE)
+summary(ESMNM_Auto)
+jpeg("ETSMNM_Residuals.jpg")
+#ggtsdisplay(ESMNM_Auto$residuals, lag= 200, main = "ETSMNM Residuals")
+checkresiduals(ESMNM_Auto)
+dev.off()
+checkresiduals(ESMNM_Auto)
+
+```
+
+# ARIMA Model 
+```{r}
+plot(decompose(ts_k_impw_nout))
+jpeg("Original_TimeSeries_ACFPACF.jpg")
+ggtsdisplay(ts_k_impw_nout,main = "Original Time Series ACF PACF")
+dev.off()
+#1 difference for trend
+diff_ts_k_impw <- diff(ts_k_impw_nout)
+jpeg("ARIMA Difference_Residuals.jpg")
+ggtsdisplay(diff_ts_k_impw,lag = 30,main ="Residuals from 1st difference")
+dev.off()
+kpss.test(diff_ts_k_impw)  # both test suggests stationarity 
+adf.test(diff_ts_k_impw)
+#Apply 7 days seasonal SARIMA with 1 diif
+#SARIMA(0,1,0)(0,1,0))
+fit1 <- Arima(ts_k_impw_nout, order=c(0,1,0), seasonal=c(0,1,0))
+jpeg("ARIMA SeasonalDiff_Residual.jpg")
+ggtsdisplay(residuals(fit1), lag = 50,main="Fit1 - Residuals from ARIMA(0,1,0)(0,1,0)")
+dev.off()
+#checkresiduals(fit1,plot = TRUE)
+#SARIMA(0,1,0)(0,1,1))
+fit2 <- Arima(ts_k_impw_nout, order=c(0,1,0), seasonal=c(0,1,1))
+jpeg("ARIMA 7SMASeasonalDiff_Residual.jpg")
+ggtsdisplay(residuals(fit2), lag= 100,main="Fit2 - Residuals from ARIMA(0,1,0)(0,1,1)")
+dev.off()
+#checkresiduals(residuals(fit2),plot = TRUE)
+#SARIMA(0,1,1)(0,1,1))
+fit3 <- Arima(ts_k_impw_nout, order=c(0,1,1), seasonal=c(0,1,1))
+jpeg("ARIMA 1MA 7SMASeasonalDiff_Residual.jpg")
+ggtsdisplay(residuals(fit3), lag= 100,main="Fit3 - Residuals from ARIMA(0,1,1)(0,1,1)")
+dev.off()
+#checkresiduals(fit3,plot = TRUE)
+print(Box.test(residuals(fit3), lag = 1, type = "Ljung-Box"))
+#SARIMA(6,1,6)(0,1,0))
+fit4 <- arima(ts_k_impw_nout, order=c(1,1,1), seasonal=c(0,1,1))
+jpeg("ARIMA 1AR 1MA 7SMASeasonalDiff_Residual.jpg")
+ggtsdisplay(residuals(fit4), lag= 300,main="Fit4 - Residuals from ARIMA(1,1,1)(0,1,1)")
+dev.off()
+#checkresiduals(residuals(fit4),plot= TRUE)
+print(Box.test(residuals(fit4), lag = 1, type = "Ljung-Box"))
+
+#Auto ARIMA
+fit5 <- auto.arima(ts_k_impw_nout)
+jpeg("ARIMA Auto_Residual.jpg")
+ggtsdisplay(residuals(fit5), lag= 300,main="Fit5 -Residuals from Auto ARIMA(1,0,0)(0,1,1)")
+dev.off()
+print(Box.test(residuals(fit5), lag = 1, type = "Ljung-Box"))
+#checkresiduals(residuals(fit5),plot= TRUE)
+
+# Run Both ARIMA models for Rolling Origin
+ARIMASelected <- Modeltest("arima(train_set,order=c(1,1,1), seasonal=c(0,1,1))",forcstval="pred" ,ts_k_impw_nout,ts_k_test_nout,ModelName ="ARIMA(111)(011)")
+print(ARIMASelected)
+# Auto Selected
+ARIMAAuto <- Modeltest("arima(train_set,order=c(1,0,0), seasonal=c(0,1,1))",forcstval="pred" ,ts_k_impw_nout,ts_k_test_nout,ModelName ="ARIMA(100)(011)")
+print(ARIMAAuto)
+
+```
+
+# Prepare data for Regression Using Dummy variables and Lags
+```{r}
+# Total 735 observaltion, dor weekday dummies we need repeatation = 105(735/7)
+D1 <- rep(c(1,0,0,0,0,0,0),105)
+D2 <- rep(c(0,1,0,0,0,0,0),105)
+D3 <- rep(c(0,0,1,0,0,0,0),105)
+D4 <- rep(c(0,0,0,1,0,0,0),105)
+D5 <- rep(c(0,0,0,0,1,0,0),105)
+D6 <- rep(c(0,0,0,0,0,1,0),105)
+D7 <- rep(c(0,0,0,0,0,0,1),105)
+Dout <- rep(c(0),735)
+Dout[641] <- 1 # Set 1 for outlier 
+
+Reg_data <- as.data.frame(cbind(ts_k_impw,D1,D2,D3,D4,D5,D6,D7,Dout))
+colnames(Reg_data) <- c("ATMW","D1","D2","D3","D4","D5","D6","D7","Dout")
+Reg_data$L7_ATMW <- shift(Reg_data$ATMW,n = 7,fill= NA, type="lag")
+Reg_data$L1_ATMW <- shift(Reg_data$ATMW,n = 1,fill= NA, type="lag")
+Reg_data$L2_ATMW <- shift(Reg_data$ATMW,n = 2,fill= NA, type="lag")
+Reg_data$Trend <-  c(1:nrow(Reg_data))
+
+```
+# Regression Function with Intial data split 
+```{r}
+RegmodelCV <- function(df,frm="ATMW~.",ModelName,origins=10,h=30,step=7,lag=0) {
+#Split Data
+Reg_data = df
+origins = origins
+h = h
+step = step
+df_length <- nrow(Reg_data)
+dftrain_length <- df_length - h - (origins*step) + 1   # multiply by 7 for multistep ahead validation
+dftest_length <- h + (origins*step) - 1
+Reg_test <- slice_tail(Reg_data, n=dftest_length)
+reg_forecasts <- matrix(NA, nrow=origins, ncol=h)
+reg_holdout <- matrix(NA, nrow=origins, ncol=h)
+ICs <- matrix(NA,nrow=origins,ncol=3)
+
+colnames(ICs) <- c("AIC","AICc","BIC")
+colnames(reg_forecasts) <- paste0("horizon",c(1:h))
+rownames(reg_forecasts) <- paste0("origin",c(1:origins))
+dimnames(reg_holdout) <- dimnames(reg_forecasts)
+regtestmetrix <- data.frame("MAE"= double(), "MSE"= double(),"MAPE"= double(),"RMSE"= double(),"WAPE"=double(),"AIC"= double())
+regtrainmetrix <- data.frame("MAE"= double(), "MSE"= double(),"MAPE"= double(),"RMSE"= double(),"WAPE"=double(),"AIC"= double())
+# Out of Sample cross validation 
+for(i in 1:origins){
+# Create a ts object out of the ts_k_impw data
+  if (i != 1){j <- (i-1)*7} else {j <- i}
+  train_set <- Reg_data[seq(1,(dftrain_length+j-1)),]
+  test_start <- nrow(train_set)+1
+  test_set <- Reg_data[seq(test_start,test_start+h-1),]
+# Write down the holdout values from the test set
+  reg_holdout[i,] <- test_set$ATMW
+  # Regression model with all dummy variables
+  Rgfit1 <- lm(formula=frm, data=train_set)
+  ICs[i,] <- c(AIC(Rgfit1),AICc(Rgfit1),BIC(Rgfit1))
+  fitted_train <- Rgfit1$fitted.values
+  actual_train <- train_set$ATMW[(lag+1):dim(train_set)[1]]
+  # Produce forecasts and write them down
+  regpred <- predict(Rgfit1,newdata = subset(test_set,select=-ATMW))
+    reg_forecasts[i,] <- regpred 
+  # Prepare test error data
+  meanabserror <- mae(reg_holdout[i,],reg_forecasts[i,])
+  meansqerror <- mse(reg_holdout[i,],reg_forecasts[i,])
+  meanabspererror <- mape(reg_holdout[i,],reg_forecasts[i,])
+  rootmeansqerror <- rmse(reg_holdout[i,],reg_forecasts[i,])
+  wapeerror <- sum(abs(diff(reg_holdout[i,]-reg_forecasts[i,])))/sum(reg_holdout[i,])
+  regtestmetrix[nrow(regtestmetrix) + 1,] = c(meanabserror,meansqerror,meanabspererror,rootmeansqerror,wapeerror,0)
+  # Prepare Train error data
+  meanabserror1 <- mae(actual_train,fitted_train)
+  meansqerror1 <- mse(actual_train,fitted_train)
+  meanabspererror1 <- mape(actual_train,fitted_train)
+  rootmeansqerror1 <- rmse(actual_train,fitted_train)
+  wapeerror1 <- sum(abs(diff(actual_train-fitted_train)))/sum(actual_train)
+  regtrainmetrix[nrow(regtrainmetrix) + 1,] = c(meanabserror1,meansqerror1,meanabspererror1,rootmeansqerror1,wapeerror1,AIC(Rgfit1) )
+}
+Testerror <- round(colMeans(regtestmetrix),2)
+errmet <- rbind(cbind(Model=ModelName,Sample="In Sample",t(Trainerror)),cbind(Model=ModelName,Sample="Out Sample",t(Testerror)))
+retval <- list(errmet,round(Rgfit1$residuals))
+return(retval)
+}
+
+```
+# Run regression Models
+```{r}
+# Correlation Metrix for dummy seasonal variables
+cor(subset(Reg_data,select= c(D1,D2,D3,D4,D5,D6)))
+# Models test 
+Rgfit1 <- lm(ATMW~D1+D2+D3+D4+D5+D6, data=Reg_train)
+#print(vif(Rgfit1))
+Rgfit2 <- lm(ATMW~D1+D2+D3+D4+D6+L7_ATMW+L1_ATMW, data=Reg_train)
+print(vif(Rgfit2))
+print(summary(Rgfit2))
+print(Box.test(residuals(Rgfit2), lag = 1, type = "Ljung-Box"))
+Rgfit3 <- lm(ATMW~D1+D3+D4+D6+L7_ATMW+L1_ATMW+Dout+Trend, data=Reg_train)
+print(vif(Rgfit3))
+print(Box.test(residuals(Rgfit3), lag = 1, type = "Ljung-Box"))
+
+# Estimate avergae error metrics using rolling origin 
+# MOdel 1
+RgdummyLag71 <- RegmodelCV(Reg_data,frm="ATMW~D1+D2+D3+D4+D6+L7_ATMW+L1_ATMW+Dout",ModelName="Reg dummy and Lag",origins=10,h=30,step=7, lag= 7)
+print(RgdummyLag71[1])
+#tsdisplay(ts(Rgdummy[[3]],start=c(12,1),frequency = 7),lag=100)
+# Regression with seasonal lag
+RgdummyLagOtrend <- RegmodelCV(Reg_data,frm="ATMW~D1+D3+D4+D6+L7_ATMW+L1_ATMW+Dout+Trend",ModelName=" Reg dummy,Lag,Trend,Outlier", origins=10,h=30,step=7, lag=7)
+print(RgdummyLagOtrend[1])
+jpeg("RegressionEstimated_Residuals.jpg")
+ggtsdisplay(ts(unlist(RgdummyLagOtrend[2]),start=c(12,1),frequency = 7),lag=300,main ="RgFit2-Regression Selected variable Residuals")
+dev.off()
+#tsdisplay(ts(Rgdummylag71[[3]],start=c(12,1),frequency = 7),lag=100)
+
+```
+# Auto selection of variables for Regression
+```{r}
+model <- lm(ATMW~.,data = Reg_data)
+Autoselect <- step(model,direction= "backward", k =2)
+# Model from backward selection 
+#AIC = 1992
+#ATMW ~ D1 + D3 + D4 + D6 + L7_ATMW + L1_ATMW + Trend
+RgAutosel <- RegmodelCV(Reg_data,frm="ATMW ~ D1 + D3 + D4 + D6 +Dout+ L7_ATMW + L1_ATMW + Trend",ModelName= "Reg Auto",origins=10,h=30,step=7,lag = 7)
+print(RgAutosel[1])
+jpeg("RegressionAuto_Residuals.jpg")
+ggtsdisplay(ts(unlist(RgAutosel[2]),start=c(12,1),frequency = 7),lag=300,main ="Regression Auto Residuals")
+dev.off()
+```
+
+# Neural Network Forescasting Model 
+```{r}
+
+nnmodel = nnetar(ts_k_impw, repeats =30,P = 7)
+NNtest <- Modeltest("forecast::forecast(nnetar(train_set,repeats =30,P = 7),h)",ts_k_impw, ts_k_test,ModelName="NeuralNetwork", forcstval = "mean")
+print(NNtest)
+NNforecast <- forecast::forecast(nnmodel,h=14)
+jpeg("NN Forecast.jpg")
+plot(NNforecast)
+dev.off()
+jpeg("NN Residuals.jpg")
+ggtsdisplay(nnmodel$residuals,lag = 100, main= "NN Residuals")
+dev.off()
+
+```
+
+# Plot all models together for 30 holdout
+```{r}
+# Split data for ARIMA and Naive
+final.train <- ts(ts_k_impw[1:705],
+           frequency=frequency(ts_k_impw),
+           start=start(ts_k_impw))
+final.test <- ts(ts_k_impw[(706):735])
+#Split data for regression 
+Reg_train <- Reg_data[1:705,]
+Reg_test <- Reg_data[706:735,]
+#Splitr data for exponential smoothing 
+ESfinal.train <- ts(ts_k_impw_m[1:705],
+           frequency=frequency(ts_k_impw_m),
+           start=start(ts_k_impw_m))
+ESfinal.test <- ts(ts_k_impw_m[(706):735])
+
+# Fit different models smoothing as predict 30 days decided earlier
+SESautocoeff <- es(ESfinal.train, model='MNM', h = 30)
+ARIMA <- arima(final.train, order=c(1,1,1), seasonal=c(0,1,1))
+arimapred <- predict(ARIMA,30)
+Rgfit1 <- lm(ATMW~D1+D3+D4+D6+L7_ATMW+L1_ATMW+Dout+Trend, data=Reg_train)
+regpred <- predict(Rgfit1,newdata = subset(Reg_test,select=-ATMW))
+regpredci <- predict(Rgfit1,newdata = subset(Reg_test,select=-ATMW), interval = "prediction", level = 0.95)
+SNaiveforecast <- snaive(final.train,h = 30)
+NNforecast <- forecast::forecast(nnetar(final.train, repeats =30,P = 7),h=30)
+
+# Forecast for all models in one dataframe for plotting
+df <- data.frame(dt = Date[706:735],Original= final.test,ESMNM = SESautocoeff$forecast,Rgression = regpred, SARIMA = arimapred$pred, NN = NNforecast$mean, SNaive = SNaiveforecast$mean )
+df1 <- reshape2::melt(df, id.vars = "dt", measure.vars = c("Original","ESMNM","Rgression","SARIMA","NN","SNaive"))
+colnames(df1) <- c("Date","Models","ATMWithdrawl")
+df$Original <- ts(df$Original, start=c(112,6), frequency = 7)
+RMSE <- c(rmse(df$Original,df$SNaive),rmse(df$Original,df$ESMNM),rmse(df$Original,df$Rgression),rmse(df$Original,df$SARIMA),rmse(df$Original,df$NN))
+print(RMSE)
+
+ggplot(data= df1,aes(x= Date, y = ATMWithdrawl, color= Models))+
+  geom_line() + ggtitle(label="Model prediction for 30 days")
+ggsave("All Models.jpg")
+
+ggplot(data= df1 %>% filter(Models %in% c("Original", "ESMNM")) ,aes(x= Date, y = ATMWithdrawl, color= Models))+
+  geom_line() + ggtitle(label="Out-of-Sample Forecast for ES")
+ggsave("Final ESMNM comparsion.jpg")
+
+
+```
+# Predict 14 values for all models
+```{r}
+# Regression 
+# Extrapolate and Forecast of Lag ATM withdrawls
+ATMLag7 <- es(ts(Reg_data$L7_ATMW, frequency = 7),model='ANA',h= 14, holdout=FALSE)
+ATMLag1 <- es(ts(Reg_data$L1_ATMW, frequency = 7),model='ANA',h= 14, holdout=FALSE)
+D1f <- rep(c(1,0,0,0,0,0,0),2)
+D2f <- rep(c(0,1,0,0,0,0,0),2)
+D3f <- rep(c(0,0,1,0,0,0,0),2)
+D4f <- rep(c(0,0,0,1,0,0,0),2)
+D5f <- rep(c(0,0,0,0,1,0,0),2)
+D6f <- rep(c(0,0,0,0,0,1,0),2)
+D7f <- rep(c(0,0,0,0,0,0,1),2)
+Dof <- rep(c(0),14)
+Trend <- seq(736,749)
+dfforecast <- data.frame(cbind(D1f,D2f,D3f,D4f,D5f,D6f,D7f,c(ATMLag7$forecast),c(ATMLag1$forecast),Dof,Trend))
+colnames(dfforecast) <- c("D1","D2","D3","D4","D5","D6","D7","L7_ATMW","L1_ATMW","Dout","Trend")
+# Fit Model 
+Rgfit1 <- lm(ATMW ~ D1 + D3 + D4 + D6 +Dout+ L7_ATMW + L1_ATMW + Trend, data=Reg_data)
+Regforcast <- predict(Rgfit1,newdata=dfforecast)
+ggplot(data= data.frame(cbind(index=seq(1,14),Forecast= Regforcast)))+ geom_line(aes(x=index,y=Forecast )) + ggtitle("Regression Forecast for 14 days")
+ggsave("Regression 14 days.jpg")
+```
+# 14 Forecast ES and ARIMA other models
+```{r}
+# Forecast unseen 14 days
+ESforecast <- es(ts_k_impw_m, model='MAM', h = 14)
+ARIMA <- arima(ts_k_impw, order=c(1,1,1), seasonal=c(0,1,1))
+dfforecast <- as.data.frame(cbind(index=seq(1,14),ESforecast$forecast,ARIMAforecast$pred))
+colnames(dfforecast) <- c("Index","ESForecast","ARIMAForecast")
+# Print Forecast from all models
+ggplot(data= dfforecast)+ geom_line(aes(x=Index,y= ESForecast )) + ggtitle("Exponential Smoothing MNM Forecast for 14 days")
+ggsave("ES 14 days.jpg")
+ggplot(data= dfforecast)+ geom_line(aes(x=Index,y=ARIMAForecast )) + ggtitle("ARIMA(1,1,1)(0,1,1) Forecast for 14 days")
+ggsave("ARIMA 14 days.jpg")
+```
+

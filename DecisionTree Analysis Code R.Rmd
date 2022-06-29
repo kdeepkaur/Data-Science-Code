@@ -1,0 +1,415 @@
+---
+title: "Decision Tree Implementation and Analysis"
+author: Student Id 35984681
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+geometry: margin=1in
+output: 
+ pdf_document: default
+ html_document: default
+ number_sections: false
+header-includes:
+  \usepackage{fvextra}
+  \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+```{r,include=FALSE}
+#setwd("D:/Modules/Programming Final Project/Final Report")
+install.packages("kableExtra")
+install.packages("flextable")
+install.packages("lemon")
+install.packages("gtsummary")
+install.packages("ggpubr")
+library(flextable)
+library(kableExtra)
+library(broom)
+library(ggpubr)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(data.table)
+library(gridExtra)
+library(knitr)
+library(gtsummary)
+library(lemon)
+```
+
+# Abstract: 
+
+A decision tree is a tree-structured supervised learning model; it is easy to understand and explain to anyone[1]. In this report, a decision tree classifier is built and validated against the existing classifier within “sklearn.tree” package of python. Python is the primary coding language used to develop the decision tree classifier whereas R is used for program performance evaluation and analysis. Further program is compared with the existing sklearn classifier. Initially, the program was tested against various  mock datasets and datasets from the UCI Machine Learning repository. But two datasets are used for final analysis and evaluation, Iris dataset from python and banknote authentication dataset from UCI.
+
+# Introduction: 
+
+The decision tree is one of the oldest and most popular techniques for learning discriminatory models, which has been developed independently in the statistical (Breiman, Friedman, Olshen, & Stone, 1984; Kass, 1980) and machine learning (Hunt, Marin, & Stone, 1966; Quinlan, 1983, 1986) communities. An extensive survey of decision tree learning can be found in Murthy (1998)[1]. The main advantage of a decision tree classifier is that it needs very little data preparation compared to other classification algorithms, since they need data normalization, pre-processing to deal with missing values. Moreover, Decision trees can be easily validated using a statistical test, which enhances their reliability[2].
+
+To understand the decision tree model. We will start with a binary decision tree with target variable y (0 and 1) and two predictor variables $X_1$ and $X_2$ with continuous values ranging from 0 to 1 as shown in Figure 1. The decision tree has two major components inspired by a tree structure. Node and branches, where nodes are further classified in three categories. 1) Root- The top decision node results of which divides the data into two or more subsets. 2) Internal– Provides further choices for dataset extracted from previous nodes and split them further as per the decision condition in it. 3) Leaf- the last nodes in the tree also called end nodes, as it gives the final result of the various decisions. 
+```{r decisiontree, out.width='40%', fig.align='center', fig.cap='Decision Tree[3]',echo=FALSE}
+knitr::include_graphics('Decision tree image.jpg')
+
+```
+Each path from root node through internal nodes to leaf nodes represents a classification decision rule and is named as a branch. This report discusses the method to build the decision tree in the following section.
+
+# Method:
+
+The major steps that go into building a decision tree are splitting and stopping for pruning. To understand the algorithm of the decision trees we will use two continuous input variables and one response variable of two classes. 
+
+## Splitting:
+splitting is the process to split the data from the parent node into two or more child nodes based on certain conditions of the input variables. Characteristics that are related to the degree of ‘purity’ of the resultant child nodes (the proportion with the target condition) are used to choose between different potential input variables; these characteristics include entropy, Gini index, classification error, information gain, gain ratio, and towing criteria[4]. Splitting is a recursive process that continues until all the nodes formed are homogeneous. Continues input variables uses condition like $X_1<\alpha$ and $X_1>=\alpha$ for left and right child node of the split, where $\alpha$ is the midpoints of two continuous values of sorted input variables. Whereas discrete and categorical variables usually pass down all the data points matching to condition $X_1=\alpha$ value to left and $X_1!=\alpha$ to the right child node of the tree.
+In this report, ‘Gini’ and ‘Entropy’ are the two methods used to gauge the purity of the child nodes or assess the information gained with every split.
+
+**GINI:** Gini index or gini impurity, calculates the amount of probability of a specific feature that is classified incorrectly when selected randomly[5].It ranges between 0 and 1, where 0 suggest the purity of the node(all the elements in the node belongs to same class) and 1 suggest the random distribution of the classes in any node. Mathematically it is determined by deducting the sum of squared probabilities of each class from one Eq 1.
+
+\begin{equation}
+\label{eqn:gini}
+{Gini Index} = 1 -{\sum_{i=1}^c (P_i)^2}
+\end{equation}
+
+Where c is the total number of classes and $P_i$ is the probability of picking the data point with the class i. For example, as shown in Figure 2, blue and red points suggest two classes and the vertical line at 250 of X is the split condition of variable X.
+
+```{r splitimage, out.width='40%', fig.align='center', fig.cap='Red and Blue class split at X=250',echo=FALSE}
+knitr::include_graphics('splitimage.jpg')
+
+```
+Here the left node has 6 red and 1 blue class and the right has all blue classes, so gini value for left, right and parent nodes can be calculated using Eq 2-5. 
+\begin{eqnarray}
+\label{eqn:ginilr}
+{Gini} &=& 1 -(P_r)^2-(P_b)^2\\
+{G_l}  &=& 1 -\left(\frac{6}{7}\right)^2-\left(\frac{1}{7}\right)^2\\
+{G_r}  &=& 1 -\left(\frac{4}{4}\right)^2\\
+{G_p}  &=& \left(\frac{7}{11}\right)(G_l)+\left(\frac{4}{11}\right)(G_r)
+\end{eqnarray}
+Gini index at parent node is calculated using a weighted average of gini at left and right node.Variable with the lowest gini value at the respective datapoint is used for the split at that node.
+
+**Entropy :**
+It is a measure of disorder. A high order of disorder means a low level of impurity, usually, it ranges from 0 to 1 but depending upon the number of groups or classes present in the data set it could be larger than 1[5].Mathematically entropy can be written as Eq 6.
+
+\begin{equation}
+\label{eqn:entropy}
+{E(S)} = {\sum_{i=1}^c -(P_i)\log_2(P_i)}
+\end{equation}
+
+$p_i$ is the frequentist probability of class i and c is the number of classes. Considering  Figure 2 entropy for left and the right node would be  Eq 7-9 and total entropy would be the weighted average of both the nodes 
+\begin{eqnarray}
+\label{eqn:entropyeqs}
+{E_l} &=& -\left(\frac{6}{7}\right)\log_2\left(\frac{6}{7}\right)-\left(\frac{1}{7}\right)\log_2\left(\frac{1}{7}\right)\\
+{E_r}  &=& -\left(\frac{4}{4}\right)\log_2\left(\frac{4}{4}\right)\\
+{E_w} &=& \left(\frac{7}{11}\right)(E_l)+\left(\frac{4}{4}\right)(E_r)
+\end{eqnarray}
+
+Since right node has just one class, entropy for right would be 0. Once entropy is calculated information gain is derived for the split. Information gain is the difference in entropy at the current split to entropy of the parent node as in Eq 10.
+\begin{equation}
+\label{eqn:Igain}
+{IG} = {(E_p)}-{(E_w)}
+\end{equation}
+
+Higher information gain suggests more information the split has brought into the tree. Feature with the most information gain is used for the split in this method.
+The decision tree designed for this report has both criteria of splitting to choose from and depends on the user to decide the same. The methodology above is expanded to multiple continuous input variables as well. Where gini or entropy is calculated across all the input variables and all the midpoints or discrete points. Gini/entropy is compared for all variables and chosen as per the methodologies explained.
+
+## Stopping:
+Decision trees can grow faster and get complicated easily. The more complex a model is, the less reliable it will be when used to predict future records[3].In an extreme situation, a decision tree can have all leaf nodes 100% pure with very few records. This is called overfitting where the tree loses its generalization ability and shows unpredictable results with future unknown data. To avoid overfitting it is suggested to implement stopping criteria to prevent the tree from over complexity. Various techniques are used like 1.) max depth – It stops the tree before, after predefined numbers of depth achieved, one parent node split is of depth 1. 2.) Minimum number of datapoints in a leaf .3.) Minimum numbers of data points in a node prior to splitting.
+
+## Decisiontree Design:
+The decision tree classifier for this report is designed using the binary split method and is capable of training for multi-class response variables. The following parameters can be used to build and generalize the tree.
+
+* Split criteria: {'Gini, 'Entropy}
+* Max Depth: int, default -1
+* Minimum elements for split: int or float, default 2
+
+This is implemented in python where splits are identified in various python functions. Criteria for each best split along with all previous conditions are stored recursively in the Tree class object, which eventually used to predict the output for validation and unknown data. Max depth and minimum numbers of elements for the split are used as pre pruning techniques to avoid overfitting of the decision tree.
+It is designed for multivariate continuous and discrete variables as in sklearn classifier. Implementation is tested against mock data and two other files from the UCI dataset library explained in the next section.
+
+
+## Discussion
+Further, this report will analyse and compare the implemented decision tree code and existing sklearn classifier in python. To achieve the same, two files with all computational and machine learning measures for 5 fold cross validation data of both the models (implemented decision tree and sklearn classifier) are imported here. These files are generated in python by running the models multiple times with different parameters like split criteria,max depth, min number of elements for split etc.Samples of both the files are shown in Table 1 and 2. Where ClassnAvg represents row for classes, average and weighted average with all machine learning and computational measures across various datasets generated by cross validation. Train time and memory used is also calculated.
+```{r warning=FALSE}
+#dt refers to implemented decision tree and sk to sklearn classifier output 
+dtFileread <- as_tibble(read.csv("DToutput_irisdata.csv"))
+skFileread <- as_tibble(read.csv("Skoutput_irisdata.csv"))
+names(dtFileread)[1] <- "ClassnAvg"
+names(skFileread)[1] <- "ClassnAvg"
+
+flextable(dtFileread %>% arrange(TreeDepth) %>% slice_head(n = 10),) %>% align(align = "left", part = "all") %>% set_caption("Sample of Implemented DT performance for different parameters")  %>% theme_zebra()%>%height_all(0.5) %>% set_table_properties(layout='autofit')%>% fit_to_width(7.5) 
+
+flextable(skFileread %>% arrange(TreeDepth) %>% slice_head(n = 10),) %>% align(align = "left", part = "all") %>% set_caption("Sample of Sklearn DT performance for different parameters")  %>% theme_zebra()%>%height_all(0.5) %>% set_table_properties(layout='autofit')%>% fit_to_width(7.5) 
+```
+
+```{r include=FALSE}
+##ggplot functions for various plots
+
+#Function to plot ml measures for new model and sklearn classifier against various tree depth and criteria of the split
+plotperfsplit <- function(dtdata,plotname,plt)   
+{
+#Accuracy
+acc <- ggplot()+
+  geom_point(aes(x = dtdata$Minsplit ,y = dtdata$Accuracy,color = dtdata$source ))+
+  geom_line(aes(x = dtdata$Minsplit ,y = dtdata$Accuracy,color = dtdata$source))+
+scale_color_brewer(palette=plt,name = "Legend")+
+  xlab('Minsplit')+
+  ylab('Accuracy')
+
+#Precision
+pre <- ggplot()+
+  geom_point(aes(x = dtdata$Minsplit ,y = dtdata$Precision,color = dtdata$source  ))+
+  geom_line(aes(x = dtdata$Minsplit ,y = dtdata$Precision,color = dtdata$source ))+
+scale_color_brewer(palette=plt,name = "Legend")+
+  xlab('Minsplit')+
+  ylab('Precision')
+
+#Recall
+rec <- ggplot()+
+  geom_point(aes(x = dtdata$Minsplit ,y = dtdata$Recall,color = dtdata$source ))+
+  geom_line(aes(x = dtdata$Minsplit ,y = dtdata$Recall ,color = dtdata$source ))+
+  scale_color_brewer(palette=plt,name = "Legend")+
+  xlab('Minsplit')+
+  ylab('Recall')
+
+#F1score
+f1 <- ggplot()+
+  geom_point(aes(x = dtdata$Minsplit ,y = dtdata$F1Score ,color = dtdata$source))+
+  geom_line(aes(x = dtdata$Minsplit ,y = dtdata$F1Score,color = dtdata$source))+
+scale_color_brewer(palette=plt ,name = "Legend")+
+  xlab('Minsplit')+
+  ylab('F1-Score')
+
+plotname <- grid::textGrob(plotname, gp=grid::gpar(fontsize=10, fontface='bold'))
+grid_arrange_shared_legend(acc,pre,rec,f1,nrow = 2,ncol=2, position='bottom',top = plotname)
+}
+
+plotperfdepth <- function(dtdata,plotname,plt)   
+{
+#Accuracy
+acc <- ggplot()+
+  geom_point(aes(x = dtdata$TreeDepth ,y = dtdata$Accuracy,color = dtdata$source ))+
+  geom_line(aes(x = dtdata$TreeDepth ,y = dtdata$Accuracy,color = dtdata$source))+
+scale_color_brewer(palette=plt,name = "Legend")+
+  xlab('Tree Depth')+
+  ylab('Accuracy')
+
+#Precision
+pre <- ggplot()+
+  geom_point(aes(x = dtdata$TreeDepth ,y = dtdata$Precision,color = dtdata$source  ))+
+  geom_line(aes(x = dtdata$TreeDepth ,y = dtdata$Precision,color = dtdata$source ))+
+scale_color_brewer(palette=plt,name = "Legend")+
+  xlab('Tree Depth')+
+  ylab('Precision')
+
+#Recall
+rec <- ggplot()+
+  geom_point(aes(x = dtdata$TreeDepth ,y = dtdata$Recall,color = dtdata$source ))+
+  geom_line(aes(x = dtdata$TreeDepth ,y = dtdata$Recall ,color = dtdata$source ))+
+  scale_color_brewer(palette=plt,name = "Legend")+
+  xlab('Tree Depth')+
+  ylab('Recall')
+
+#F1score
+f1 <- ggplot()+
+  geom_point(aes(x = dtdata$TreeDepth ,y = dtdata$F1Score ,color = dtdata$source))+
+  geom_line(aes(x = dtdata$TreeDepth ,y = dtdata$F1Score,color = dtdata$source))+
+scale_color_brewer(palette=plt ,name = "Legend")+
+  xlab('Tree Depth')+
+  ylab('F1-Score')
+
+plotname <- grid::textGrob(plotname, gp=grid::gpar(fontsize=10, fontface='bold'))
+grid_arrange_shared_legend(acc,pre,rec,f1,nrow = 2,ncol=2, position='bottom',top = plotname)
+
+}
+
+#Function to plot computational measures for new model and sklearn classifier against various tree depth and criteria of the split
+plotcompdepth <- function(dtdata,plotname,plt) 
+{#Training Time
+time <- ggplot()+
+  geom_point(aes(x = dtdata$TreeDepth ,y = dtdata$TrainTime.MicroSec.,color = dtdata$source ))+
+  geom_line(aes(x = dtdata$TreeDepth ,y = dtdata$TrainTime.MicroSec.,color = dtdata$source))+
+scale_color_brewer(palette=plt,name = "Legend")+
+  xlab('Tree Depth')+
+  ylab('Training Time in Microsec')
+
+#Memory used
+memory <- ggplot()+
+  geom_point(aes(x = dtdata$TreeDepth ,y = dtdata$Memory.MB.,color = dtdata$source ))+
+  geom_line(aes(x = dtdata$TreeDepth ,y = dtdata$Memory.MB.,color = dtdata$source))+
+  scale_color_brewer(palette=plt,name = "Legend")+
+  xlab('Tree Depth')+
+  ylab('Memory Used in MB')
+
+plotname <- grid::textGrob(plotname, gp=grid::gpar(fontsize=10, fontface='bold'))
+grid_arrange_shared_legend(time,memory,nrow = 2,ncol=1, position='bottom',top = plotname)
+}
+
+#Function to plot computational measures for new model and sklearn classifier against various training sizes and criteria of the split
+plotcomptrain <- function(dt1,plotname,plt)
+{
+p1 <- ggplot()+
+  geom_point(aes(x = dt1$TrainingSize ,y = dt1$TrainTime.MicroSec.,color = dt1$Criterion))+
+  geom_line(aes(x = dt1$TrainingSize ,y = dt1$TrainTime.MicroSec. ,color = dt1$Criterion) )+
+  scale_color_brewer(palette=plt,name = "Legend",labels =c("Implemented Entropy","Implemented Gini"))+
+  xlab('Training Size')+
+  ylab('Training Time in Microsecs')
+
+p2 <- ggplot()+
+  geom_point(aes(x = dt1$TrainingSize ,y = dt1$Memory.MB.,color = dt1$Criterion))+
+  geom_line(aes(x = dt1$TrainingSize ,y = dt1$Memory.MB. ,color = dt1$Criterion) )+
+
+  scale_color_brewer(palette=plt,name = "Legend",labels =c("Implemented Entropy","Implemented Gini"))+
+  xlab('Training Size')+
+  ylab('Memory used in MB')
+
+plotname <- grid::textGrob(plotname, gp=grid::gpar(fontsize=10, fontface='bold'))
+grid_arrange_shared_legend(p1,p2,nrow = 2,ncol=1, position='bottom',top = plotname)
+}
+
+```
+**Machine Learning Measures:** Since we have data for multiple measures, it will be good to visualize how the performance of both the models are affected at different tree depths,Minimum number of splits and split methodology.First we will analyse performance measures against tree depth and split criteria with no minimum elements split specified. Graph 1 represents the change in performance metrics for Entropy against various tree depth, and Graph 2 is plotted for Gini. Tree depth 5 represents the full-grown tree.
+```{r}
+# Prepare data by taking the mean of performance metrics for different depth and split criterion for Tree depth analysis
+# Minsplit 2 rows are with no minsplit criteria
+dtfilegroup <- dtFileread %>% filter(ClassnAvg=="macro avg" & Minsplit == 2 ) %>% group_by(TreeDepth,Criterion) %>% summarise_at(vars(Accuracy,Precision,Recall,F1Score,TrainTime.MicroSec.,Memory.MB.),mean)
+skfilegroup <- skFileread %>% filter(ClassnAvg=="macro avg"  & Minsplit == 2 ) %>% group_by(TreeDepth,Criterion) %>% summarise_at(vars(Accuracy,Precision,Recall,F1Score,TrainTime.MicroSec.,Memory.MB.),mean)
+```
+Implemented decision tree has shown the same results as sklearn at all depths for both the split criteria. Both the models have almost similar values for accuracy, precision, f1 and recall for Gini and Entropy with maximum 95\% accuracy as shown in Graph 1 and 2. 
+
+```{r fig.height= 4.2}
+data1 <- dplyr::bind_rows(list(Implemented=dtfilegroup%>% filter(Criterion=="Entropy"), sklearn=skfilegroup%>% filter(Criterion=="entropy")), .id = 'source')
+
+plotperfdepth(data1,"1:Performance measures against Tree depth for Entropy","Set1")
+
+data2 <- dplyr::bind_rows(list(Implemented=dtfilegroup%>% filter(Criterion=="Gini"), sklearn=skfilegroup%>% filter(Criterion=="gini")), .id = 'source')
+
+plotperfdepth(data2,"2:Performance measures against Tree depth for Gini","Dark2")
+```
+Further, It will be interesting to see how a change in minimum split elements impacts the performance of the tree. To achieve it, the same dataset is used and all records with a maximum tree depth of 5 are used to eliminate tree depth effects on the result. Graph 3 and 4 shows the changes in metrics with the minimum elements required for the split.
+```{r fig.height= 4.2}
+# Filter data with maximum tree depth to analysis results of changed in number of minimum elements for split
+dtfilegroup2 <- dtFileread %>% filter(ClassnAvg=="macro avg" & TreeDepth == 5 ) %>% group_by(Minsplit,Criterion) %>% summarise_at(vars(Accuracy,Precision,Recall,F1Score,TrainTime.MicroSec.,Memory.MB.),mean)
+skfilegroup2 <- skFileread %>% filter(ClassnAvg=="macro avg"  & TreeDepth == 5 ) %>% group_by(Minsplit,Criterion) %>% summarise_at(vars(Accuracy,Precision,Recall,F1Score,TrainTime.MicroSec.,Memory.MB.),mean)
+data1split <- dplyr::bind_rows(list(Implemented=dtfilegroup2%>% filter(Criterion=="Entropy"), sklearn=skfilegroup2%>% filter(Criterion=="entropy")), .id = 'source')
+
+plotperfsplit(data1split,"3:Performance measures against Minsplit for Entropy","Set1")
+
+data2split <- dplyr::bind_rows(list(Implemented=dtfilegroup2%>% filter(Criterion=="Gini"), sklearn=skfilegroup2%>% filter(Criterion=="gini")), .id = 'source')
+
+plotperfsplit(data2split,"4:Performance measures against Minsplit for Gini","Dark2")
+
+```
+Graphs 3 and 4 suggests Implemented model accuracy, precision, recall and f1 scores are comparable to sklearn with minor difference of 0.5 to 1\% in both Gini and Entropy split. Implemented tree performed slightly better for entropy  with more consistent metrics but both represents exactly same accuracy after 10 minimum sample points.This difference can be there due to various other parameters involved in sklearn classifier
+
+**Computational Measures:** Computational measures are another aspect of comparing different models. This explains how long the model would train and how much memory it will be using for the same.
+Graph 5 explains the change in computation parameters like time and memory used against Entropy for both implemented and sklearn decision tree. Graph 6 reflects the changes for Gini.
+```{r fig.height= 4.2}
+plotcompdepth(data1,"5:Computational measures against Tree depth for Entropy","Set1")
+
+plotcompdepth(data2,"6:Computational measures against Tree depth for Gini","Dark2")
+```
+
+Computational requirements of the implemented decision tree are clearly higher then the sklearn decision tree. 
+
+To further confirm our findings, we used statistical techniques like comparing the mean of two samples to determine if they are the same or not. Z-test statistics shall be used to compare accuracy/precision/F1score and recall as we are comparing proportion data but, in this case, since population standard deviation is unknown and all metrics are normally distributed as per central limit theorem, we have used t-test statistics for all metrics. Sample data for both models are more than 30 datapoints.
+```{r}
+#Extracted records for average precision and not class level precision in both the files for comparison
+dt1 <- dtFileread %>% filter(ClassnAvg == 'macro avg')    
+sk1 <- skFileread %>% filter(ClassnAvg == 'macro avg') 
+
+#Function to create column vector for t-test results table
+tablecolumns <- function(pval,condlevel,alternative){
+colval <- c(round(pval,5),1-condlevel,alternative,if  (pval <(1-condlevel)) {"Reject Null Hypothesis"} else {"Accept Null Hypothesis"})
+return(colval)
+}
+
+#T-test for classification metrics with null hypothesis of performance accuracy/precision/recall/F1score for implemented tree and sklearn is same
+accttest = t.test(dt1$Accuracy,sk1$Accuracy)
+prettest = t.test(dt1$Precision,sk1$Precision)
+recttest = t.test(dt1$Recall,sk1$Recall)
+f1ttest = t.test(dt1$F1Score,sk1$F1Score)
+
+#Train time and memory usage comparison with null hypothesis of train time and memory used in implemented tree is less than or equal to sklearn
+timettest = t.test(dt1$TrainTime.MicroSec.,sk1$TrainTime.MicroSec.,alternative = "greater")
+memttest = t.test(dt1$Memory.MB.,sk1$Memory.MB., alternative = "greater")
+
+#Create column vectors for t-test table
+Accuracy <- tablecolumns(accttest$p.value,attr( accttest$conf.int, "conf.level" ),accttest$alternative)
+Precision <- tablecolumns(prettest$p.value,attr( prettest$conf.int, "conf.level" ),prettest$alternative)
+Recall <- tablecolumns(recttest$p.value,attr( recttest$conf.int, "conf.level" ),recttest$alternative)
+F1Score <- tablecolumns(f1ttest$p.value,attr( f1ttest$conf.int, "conf.level" ),f1ttest$alternative)
+TrainTime <- tablecolumns(timettest$p.value,attr( timettest$conf.int, "conf.level" ),timettest$alternative)
+Memory <- tablecolumns(memttest$p.value,attr( memttest$conf.int, "conf.level" ),memttest$alternative)
+
+table <- transpose(data.frame(Accuracy,Precision,Recall,F1Score,TrainTime,Memory))
+colnames(table) <- c("p-value","significance level","Alternative Hypothesis","Outcome")
+rownames(table) <- c("Accuracy","Precision","Recall","F1 Score","Training Time","Memory used")
+
+knitr::kable(table,caption = "Performance of implemented tree against sklearn model for Iris dataset",align = "cccl")
+```
+As seen in Table 3, the null hypothesis is accepted in the case of accuracy/precision/F1 score/Recall, which suggests that these performance metrics are the same for both implemented decision tree and sklearn decision tree classifier. In all of the machine learning measures, the p-value obtained is significantly larger than the significance level of 0.05. Whereas computational measures like training time and memory used are suggested otherwise. Computational measures are tested with the null hypothesis that time and memory used in the implemented tree was less than or equal to sklearn classifier. Here t test has rejected the null hypothesis. 
+We can conclude that implemented tree's performance is as good as sklearn model but it is taking more time and memory for the training the data.
+
+**Training Size vs Computational measures :** In this section of the report, training time and memory occupied during the training of the models is assessed against the different data size samples. Another dataset 
+“Banknote authentication” used for this purpose. It has 1372 data instances and 4 input variables with two output classes https://archive.ics.uci.edu/ml/datasets/banknote+authentication.All the input variables are independent of each other with no significant correlation. Thus, all the variables are used in decision tree training. Both the models ran multiple times with different data sizes ranging from 10\% of the total dataset to 90\% to create output files measuring training sizes, training time and memory used. 
+```{r, Include=FALSE}
+#Import banknote performance files
+dt1 <- as_tibble(read.csv("DToutput_banknote.csv"))
+sk1 <- as_tibble(read.csv("skoutput_banknote.csv"))
+names(dt1)[1] <- "ClassnAvg"
+names(sk1)[1] <- "ClassnAvg"
+```
+
+
+```{r fig.height= 4.2}
+dt2 <- dt1 %>% filter(ClassnAvg == 'macro avg' & TreeDepth == 5 & Minsplit == 2)
+#sk2 <- sk1 %>% filter(ClassnAvg == 'macro avg'& TreeDepth == 5 & Minsplit == 2)
+plotcomptrain(dt2,"5:Implemented Decision Tree computational performace for various training sizes","Spectral")
+```
+As per Graph 5. Training time and memory, both seems to be linearly correlated to the training sizes involved. This can be validated by linear regression, using training time and memory as response variables. The performance data gathered has various parameters like max depth and min leaf nodes elements etc. The Linear regression model can further help to derive relationship between these parameters and computational measures.
+```{r include = FALSE }
+dtoutput <- dt1 %>% filter(ClassnAvg == 'macro avg') %>% mutate(TrainTime.MicroSec. = TrainTime.MicroSec./1000000) # change time to secs
+names(dtoutput)[names(dtoutput) == "TrainTime.MicroSec."] <- "TrainTime.secs"
+# Linear Model for train time
+modeltt <- lm(TrainTime.secs~ TrainingSize+factor(Criterion)+TreeDepth+Minsplit,data = dtoutput)
+smodelttlin <- step(modeltt,direction = "backward", k =5 )
+
+# Model for memory used
+modelm <- lm(Memory.MB.~ TrainingSize+factor(Criterion)+TreeDepth+Minsplit, data = dtoutput)
+smodelmlin <- step(modelm,direction = "backward",k =5 )
+```
+```{r regression, out.width='80%', fig.align='center', fig.cap='Backward selection for time and memory',echo=FALSE}
+knitr::include_graphics('Regression.png')
+```
+
+```{r message = FALSE, Warning = FALSE,results='asis'}
+tbltt <- t(coef(smodelttlin))
+rownames(tbltt)<- "Coefficients"
+knitr::kable(tbltt,align = "c",caption = "Coefficients for train time",escape = TRUE)
+
+tblmm <- t(coef(smodelmlin))
+rownames(tblmm)<- "Coefficients"
+knitr::kable(tblmm,align = "c",caption = "Coefficients for memory",escape = TRUE)
+
+old <- set_flextable_defaults(fonts_ignore=TRUE)
+smodelttlin %>% tbl_regression() %>% bold_p(t = 0.05, q = FALSE)%>% add_global_p(quiet = TRUE)%>% modify_caption(caption = "Fitted regression model for Training time")%>%  as_flex_table()
+
+smodelmlin %>% tbl_regression() %>% bold_p(t = 0.05, q = FALSE)%>% add_global_p(quiet = TRUE)%>% modify_caption(caption = "Fitted regression model for Memory") %>% as_flex_table()
+do.call(set_flextable_defaults, old)
+```
+Backward selection regression models were used to determine the significance of tree depth, training size, split method and min number of samples needed for the split. Fig 3 shows results of backward elimination for both time and memory side by side. The first step suggests, that eliminating minimum element for split  can reduce the AIC. Thus, it is the least relevant element to the response variables and eliminated in the next step. Final fitted models as shown in Table 6 and 7 confirms the linear relationship between various parameters of the model and the computational performance of the model. Both the models have suggested that training size, tree depth and split criteria impact the training time and memory used with 99\% confidence as the significance levels chosen in these models were 0.01. All the p-values (less than 0.01) are reflecting the significance of its input variable.
+Table 4 and 5 represents the coefficients for the final models. For both the models split criteria contributes most to the rising training time of the model followed by tree depth and training size. Higher the coefficients, more relevant the variable in determining the output.
+
+# Conclusion
+* Implemented tree has been successfully achieved comparable accuracy and other performance measures as sklearn. The relative performance of both the models is validated by t-test for all input parameters involved like criteria, tree depth etc.
+* Sklearn classifier performed better for computational aspects of the model.
+* Training time and memory in the implemented tree  is correlated to the training sizes, minimum elements for the split and split criteria as per the fitted linear regression model. But this can be improved further as training time is most defined by criteria involved. Tuning the code for Gini and Entropy can improve the performance of the models.
+
+The implemented decision tree can be further tuned to reduce the time and memory involved in its processing. The introduction of more input parameters like a minimum number of elements in a leaf node and implementation of the categorical split can also be explored.
+
+# Acknowledgement
+Python code to traverse the decision tree object is from  https://www.analyticsvidhya.com/blog/2021/11/traverse-trees-using-level-order-traversal-in-python/
+            
+
+
+# Bibliographies:
+[1] Decision tree | springerlink - link.springer.com. (n.d.). Retrieved January 16, 2022, from https://link.springer.com/referenceworkentry/10.1007/978-0-387-30164-8_204
+
+[2] 1.10. decision trees. scikit. (n.d.). Retrieved January 16, 2022, from https://scikit-learn.org/stable/modules/tree.html 
+
+[3] Song, Y. Y., & Lu, Y. (2015). Decision tree methods: applications for classification and prediction. Shanghai archives of psychiatry, 27(2), 130–135. https://doi.org/10.11919/j.issn.1002-0829.215044
+
+[4]. Patel N, Upadhyay S. Study of various decision tree pruning methods with their empirical comparison in WEKA. Int J Comp Appl. 60(12):20–25. [Google Scholar]
+
+[5] Understanding the Gini Index and Information Gain in Decision Trees | by Neelam Tyagi | Analytics Steps | Medium
+
